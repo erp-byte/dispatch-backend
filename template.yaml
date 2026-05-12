@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Dispatch MCP server on AWS Lambda. Packaged as a container image,
+  exposed via a public Lambda Function URL with bearer-token auth
+  enforced inside the function.
+
+Parameters:
+  GoogleCredentialsJson:
+    Type: String
+    NoEcho: true
+    Description: >
+      Service-account JSON on a single line. Generate via the Cloud Console,
+      then run the PowerShell snippet documented in .env.example.
+
+  SpreadsheetId:
+    Type: String
+    Default: ""
+    Description: >
+      Default dispatch sheet ID. Optional — if blank, callers must pass
+      spreadsheet_id per request.
+
+  McpAuthToken:
+    Type: String
+    NoEcho: true
+    Description: >
+      Shared secret. Clients must send `Authorization: Bearer <token>`.
+      Generate a long random value, e.g. `openssl rand -hex 32`.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      Postgres connection string for the DB mirror (optional). Format:
+      postgresql://user:pass@host:5432/db. Leave blank to disable the
+      mirror entirely. If your RDS is in a private VPC, you must also
+      configure VpcConfig on the Lambda function.
+
+Resources:
+  DispatchMcpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures: [arm64]   # cheaper than x86_64 for the same perf class
+      MemorySize: 1024         # reportlab + google libs warm up faster at >=1 GB
+      Timeout: 60              # Sheets writes can take 30s+ on large batches
+      Environment:
+        Variables:
+          GOOGLE_CREDENTIALS_JSON: !Ref GoogleCredentialsJson
+          SPREADSHEET_ID:         !Ref SpreadsheetId
+          MCP_AUTH_TOKEN:         !Ref McpAuthToken
+          DATABASE_URL:           !Ref DatabaseUrl
+          LOG_LEVEL:              !Ref LogLevel
+          LOG_FORMAT:             json
+          SHEETS_DEFAULT_VALUE_INPUT:  USER_ENTERED
+          SHEETS_DEFAULT_VALUE_RENDER: FORMATTED_VALUE
+      FunctionUrlConfig:
+        AuthType: NONE          # we enforce bearer auth inside the function
+        InvokeMode: BUFFERED    # MCP json_response=True returns a single body
+    Metadata:
+      # SAM uses this to build & push the image to an ECR repo it manages.
+      DockerTag: dispatch-mcp-server-latest
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+  # ---------------------------------------------------------------------------
+  # Warmer — small Lambda that hits /health every 7 minutes to keep the main
+  # function's execution environment warm. This is a 90% solution. For
+  # guaranteed warm starts, use Provisioned Concurrency on DispatchMcpFunction.
+  # ---------------------------------------------------------------------------
+  PingerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.11
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 30
+      InlineCode: |
+        import os
+        import urllib.request
+        URL = os.environ["TARGET_URL"]
+
+        def handler(event, context):
+            req = urllib.request.Request(URL, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    return {"status": resp.status,
+                            "body": resp.read(200).decode("utf-8", "ignore")}
+            except Exception as e:
+                # Don't fail the schedule — warmer errors are logged, not raised.
+                return {"status": 599, "error": repr(e)}
+      Handler: index.handler
+      Environment:
+        Variables:
+          TARGET_URL: !Sub "${DispatchMcpFunctionUrl.FunctionUrl}health"
+      Events:
+        Warmup:
+          Type: Schedule
+          Properties:
+            Schedule: rate(7 minutes)
+            Description: "Keeps the dispatch MCP Lambda warm by pinging /health"
+            Enabled: true
+
+Outputs:
+  FunctionUrl:
+    Description: Public HTTPS URL — append /mcp to reach the JSON-RPC endpoint.
+    Value: !GetAtt DispatchMcpFunctionUrl.FunctionUrl
+  HealthUrl:
+    Description: Unauthenticated /health endpoint pinged by the warmer.
+    Value: !Sub "${DispatchMcpFunctionUrl.FunctionUrl}health"
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt DispatchMcpFunction.Arn
+  PingerArn:
+    Description: Warmer Lambda ARN
+    Value: !GetAtt PingerFunction.Arn

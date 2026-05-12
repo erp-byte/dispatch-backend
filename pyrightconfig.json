@@ -1,0 +1,27 @@
+{
+  "include": [
+    "main.py",
+    "shared",
+    "services",
+    "server",
+    "dispatch_ingest",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/dispatch_mcp_server.egg-info",
+    "docs/_sample_invoices"
+  ],
+  "extraPaths": [
+    ".",
+    "C:/Users/Lenovo/AppData/Roaming/Python/Python311/site-packages"
+  ],
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "venvPath": "C:/Program Files/Python311",
+  "venv": "",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "typeCheckingMode": "basic"
+}

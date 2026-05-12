@@ -1,0 +1,18 @@
+# Default arguments for `sam build` and `sam deploy`.
+# Override on the command line with --stack-name / --region / etc.
+
+version = 0.1
+
+[default.global.parameters]
+stack_name = "dispatch-mcp-server"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_image_repos = true   # let SAM create & manage the ECR repo
+region = "ap-south-1"        # Mumbai. Change to your preferred region.
+image_repositories = []

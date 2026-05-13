@@ -1,0 +1,49 @@
+# Render blueprint — defines the dispatch MCP service so it can be deployed
+# by pointing Render at this repo with one click instead of clicking through
+# the dashboard form. See https://render.com/docs/blueprint-spec
+#
+# Secrets (sync: false) are NOT committed here. After the first blueprint
+# deploy you set them once in the Render dashboard under the service's
+# Environment tab. They persist across redeploys.
+
+services:
+  - type: web
+    name: dispatch-mcp
+    runtime: python
+    region: singapore           # closest to ap-south-1 RDS (~50ms latency)
+    plan: free                  # change to "starter" ($7/mo) for always-on
+    branch: main
+    autoDeploy: true            # redeploy on every push to main
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn lambda_app:_app --host 0.0.0.0 --port $PORT
+
+    # Render probes this endpoint after deploy and on a periodic basis.
+    # A non-200 response triggers an automatic restart of the instance.
+    healthCheckPath: /health
+
+    envVars:
+      # Pinned Python version — Render's default lags behind.
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+      # Non-sensitive config — safe to commit.
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json
+      - key: SHEETS_DEFAULT_VALUE_INPUT
+        value: USER_ENTERED
+      - key: SHEETS_DEFAULT_VALUE_RENDER
+        value: FORMATTED_VALUE
+
+      # Secrets — fill in via Render dashboard after first deploy.
+      # sync: false tells the blueprint NOT to sync these from the file.
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: MCP_AUTH_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false

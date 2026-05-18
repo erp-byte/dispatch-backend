@@ -40,6 +40,7 @@ import os
 
 from mangum import Mangum
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -146,10 +147,17 @@ def _build_asgi_app():
 
     # Stateless HTTP + JSON response = each request stands alone. No SSE.
     # That maps cleanly onto a Lambda Function URL in BUFFERED mode.
+    # transport_security disables the SDK's DNS-rebinding host check, which
+    # is intended for localhost MCP servers. We're HTTPS-fronted behind
+    # Render/API Gateway, so the rebinding threat model doesn't apply and
+    # the default would reject our public hostname.
     mcp_server = FastMCP(
         "dispatch-mcp-server",
         stateless_http=True,
         json_response=True,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        ),
     )
     register_all(mcp_server, sheets_mgr, dispatch_mgr)
 
